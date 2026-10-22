@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x86_64
+          - os: macos-15
+            name: macos-arm64
+          - os: windows-2025
+            name: windows-x86_64
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DFAILSTEP_BUILD_EXAMPLES=OFF -DFAILSTEP_BUILD_TESTS=OFF
+          -DCMAKE_INSTALL_PREFIX=dist
+
+      - name: Build & install
+        run: cmake --build build --config Release --target install
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          tar -czf ../failstep-${{ github.ref_name }}-${{ matrix.name }}.tar.gz *
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath failstep-${{ github.ref_name }}-${{ matrix.name }}.zip
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            failstep-${{ github.ref_name }}-${{ matrix.name }}.tar.gz
+            failstep-${{ github.ref_name }}-${{ matrix.name }}.zip
+          fail_on_unmatched_files: false

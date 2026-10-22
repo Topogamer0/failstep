@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.cc }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          if [ "${{ matrix.cc }}" = "clang" ]; then
+            sudo apt-get install -y clang libclang-rt-dev || sudo apt-get install -y clang
+          fi
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFAILSTEP_WERROR=ON
+        env:
+          CC: ${{ matrix.cc }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  fuzzers:
+    name: Linux fuzzers (clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang libclang-rt-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFAILSTEP_WERROR=ON -DFAILSTEP_BUILD_FUZZERS=ON
+        env:
+          CC: clang
+      - name: Build
+        run: cmake --build build
+      # Includes fuzz_discover: a real libFuzzer run through `failstep fuzz` that
+      # must find the bug planted in examples/fuzz_parse.c (so the fuzzer
+      # crashing is the expected outcome, asserted by the test).
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    name: macOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFAILSTEP_WERROR=ON
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (MSVC /fsanitize=address)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFAILSTEP_WERROR=ON
+      - name: Build
+        run: cmake --build build --config Debug
+      # The build above exercises the full MSVC /fsanitize=address compile of the
+      # library, CLI and every example. The unit test runs here; the
+      # process-driving integration tests run on the POSIX jobs.
+      - name: Test (unit)
+        run: ctest --test-dir build -C Debug --output-on-failure -R unit

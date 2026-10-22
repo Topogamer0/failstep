@@ -1,0 +1,11 @@
+# build directories
+/build/
+/build-*/
+# failstep working/output directories
+failstep-out/
+*.sarif
+# editor / OS cruft
+*.o
+*.a
+*.swp
+.DS_Store
