@@ -56,7 +56,27 @@ FAILSTEP_API void *failstep_aligned_alloc(size_t alignment, size_t size);
  * keep working. The trade-off is that an identifier named `malloc`/`free`/...
  * anywhere -- including a struct member or local variable -- is also renamed;
  * such code can `#undef` the specific name, or define FAILSTEP_KEEP_FREE below.
+ *
+ * MSVC is the exception to "renaming the declaration is harmless": the UCRT
+ * declares these functions __declspec(dllimport), and a dllimport declaration
+ * of failstep_malloc conflicts with ours (C2375, "different linkage"). There we
+ * let the CRT headers declare the real names first; their include guards then
+ * make the code under test's own #include lines no-ops. Consequence: on MSVC,
+ * _CRT_SECURE_NO_WARNINGS and similar must come from the command line (/D),
+ * since a #define in the source would come after these headers.
  */
+#if defined(_MSC_VER)
+#  include <malloc.h>
+#  include <stdlib.h>
+#  include <string.h>
+#endif
+
+#undef malloc
+#undef calloc
+#undef realloc
+#undef strdup
+#undef strndup
+#undef aligned_alloc
 #define malloc failstep_malloc
 #define calloc failstep_calloc
 #define realloc failstep_realloc
@@ -68,6 +88,7 @@ FAILSTEP_API void *failstep_aligned_alloc(size_t alignment, size_t size);
  * straight to the real free(). Define FAILSTEP_KEEP_FREE to leave free() alone
  * (for rare code that names a field or variable `free`). */
 #ifndef FAILSTEP_KEEP_FREE
+#undef free
 #define free failstep_free
 #endif
 

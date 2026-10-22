@@ -1,6 +1,11 @@
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #  define _POSIX_C_SOURCE 200809L
 #endif
+/* Darwin hides non-POSIX names such as _SC_NPROCESSORS_ONLN once
+ * _POSIX_C_SOURCE is defined, unless _DARWIN_C_SOURCE is too. */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#  define _DARWIN_C_SOURCE 1
+#endif
 /*
  * failstep CLI -- entry point and orchestration.
  *
@@ -142,8 +147,16 @@ static void env_free(envset *e) {
     for (int i = 0; i < e->n; i++) free(e->v[i]);
 }
 
+/* LeakSanitizer is only requested on Linux: where ASan has no LeakSanitizer
+ * (MSVC) the runtime refuses to start when asked for detect_leaks=1, and on
+ * Apple platforms it is unsupported by the system toolchain. */
+#if defined(__linux__)
+#  define FS_DETECT_LEAKS "1"
+#else
+#  define FS_DETECT_LEAKS "0"
+#endif
 static const char *ASAN_DEFAULTS =
-    "ASAN_OPTIONS=detect_leaks=1:abort_on_error=0:exitcode=1:handle_segv=1";
+    "ASAN_OPTIONS=detect_leaks=" FS_DETECT_LEAKS ":abort_on_error=0:exitcode=1:handle_segv=1";
 
 /* ---- run one target process to completion ------------------------------ */
 

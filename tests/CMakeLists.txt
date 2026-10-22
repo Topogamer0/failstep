@@ -54,10 +54,18 @@ fs_expect(hang_ok       sites    clean ex_hang_ok TIMEOUT 3)
 fs_expect(abort_ok      sites    clean ex_abort_on_oom_ok)
 fs_expect(server_ok     continue clean ex_server_ok STEPS 2)
 
-# fuzz integration (Clang + libFuzzer), deterministic crash replay
+# fuzz integration (Clang + libFuzzer)
 if(FAILSTEP_BUILD_FUZZERS)
+    # Deterministic replay of a known crashing input.
     add_test(NAME fuzz_crash
         COMMAND ${Python3_EXECUTABLE} ${EXPECT}
             --failstep ${CLI} --mode fuzz --outdir ${WD}/fuzz --expect problem --type null-deref
             -- $<TARGET_FILE:ex_fuzz> ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_crash.bin)
+    # A real fuzzing run: libFuzzer, steering which allocations fail, must find
+    # the planted missing NULL check on its own (fixed seed, bounded runs).
+    add_test(NAME fuzz_discover
+        COMMAND ${Python3_EXECUTABLE} ${EXPECT}
+            --failstep ${CLI} --mode fuzz --outdir ${WD}/fuzz_discover --expect problem --type null-deref
+            -- $<TARGET_FILE:ex_fuzz> -seed=1 -runs=500000 -max_len=64
+               -artifact_prefix=${WD}/fuzz_discover/)
 endif()

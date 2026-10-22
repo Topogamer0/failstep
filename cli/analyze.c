@@ -265,6 +265,7 @@ static void parse_asan(fs_job *job, const char *text) {
         /* A SEGV at (or very near) address 0 is a dereference of the NULL the
          * failed allocation returned -- a missing NULL check. */
         const char *segv = strstr(text, "SEGV on unknown address");
+        if (!segv) segv = strstr(text, "BUS on unknown address"); /* Darwin */
         if (segv) {
             const char *addr = strstr(segv, "0x");
             unsigned long long a = addr ? strtoull(addr, NULL, 16) : ~0ull;

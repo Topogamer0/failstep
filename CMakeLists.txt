@@ -28,6 +28,9 @@ if(MSVC)
     if(FAILSTEP_WERROR)
         list(APPEND FAILSTEP_WARNINGS /WX)
     endif()
+    # getenv/fopen/fscanf are used deliberately and portably; silence the
+    # "consider using *_s" deprecations (C4996) for this project's own code.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
     set(FAILSTEP_WARNINGS -Wall -Wextra -pedantic)
     if(FAILSTEP_WERROR)

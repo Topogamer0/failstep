@@ -46,10 +46,11 @@ jobs:
           CC: clang
       - name: Build
         run: cmake --build build
+      # Includes fuzz_discover: a real libFuzzer run through `failstep fuzz` that
+      # must find the bug planted in examples/fuzz_parse.c (so the fuzzer
+      # crashing is the expected outcome, asserted by the test).
       - name: Test
         run: ctest --test-dir build --output-on-failure
-      - name: Smoke-run the fuzzer
-        run: ./build/examples/ex_fuzz -runs=200000 -max_len=64
 
   macos:
     name: macOS
@@ -71,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFAILSTEP_WERROR=ON
       - name: Build
         run: cmake --build build --config Debug
       # The build above exercises the full MSVC /fsanitize=address compile of the
