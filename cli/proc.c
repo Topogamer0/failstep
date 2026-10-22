@@ -95,24 +95,31 @@ int fs_proc_poll(fs_proc *p, long long deadline_ms, fs_proc_result *r) {
         *r = p->result;
         return 1;
     }
+
+    /* Reap first: a process that finished just as the deadline passed must be
+     * reported with its real status, not as a timeout. */
+    int status = 0;
+    pid_t w = waitpid(p->pid, &status, WNOHANG);
+    if (w == p->pid) {
+        if (WIFEXITED(status)) p->result.exit_code = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) p->result.signalnum = WTERMSIG(status);
+        p->reaped = 1;
+        *r = p->result;
+        return 1;
+    }
+    if (w < 0) { /* ECHILD: already gone */
+        p->reaped = 1;
+        *r = p->result;
+        return 1;
+    }
+
+    /* Still running: enforce the deadline. */
     if (!p->killed && fs_now_ms() >= deadline_ms) {
         kill(-p->pid, SIGKILL);
         p->killed = 1;
         p->result.timed_out = 1;
     }
-
-    int status = 0;
-    pid_t w = waitpid(p->pid, &status, WNOHANG);
-    if (w == 0) return 0; /* still running */
-
-    if (w == p->pid) {
-        if (WIFEXITED(status)) p->result.exit_code = WEXITSTATUS(status);
-        else if (WIFSIGNALED(status)) p->result.signalnum = WTERMSIG(status);
-    }
-    /* w < 0 (ECHILD): treat as finished with whatever we recorded */
-    p->reaped = 1;
-    *r = p->result;
-    return 1;
+    return 0;
 }
 
 void fs_proc_free(fs_proc *p) {
@@ -154,16 +161,29 @@ static char *build_cmdline(char *const argv[]) {
     size_t cap = 1;
     for (int i = 0; argv[i]; i++) cap += strlen(argv[i]) * 2 + 4;
     char *s = (char *)fs_xmalloc(cap);
-    s[0] = '\0';
+    size_t o = 0;
     for (int i = 0; argv[i]; i++) {
-        if (i) strcat(s, " ");
-        strcat(s, "\"");
-        for (const char *c = argv[i]; *c; c++) {
-            if (*c == '"' || *c == '\\') strncat(s, "\\", 1);
-            strncat(s, c, 1);
+        if (i) s[o++] = ' ';
+        s[o++] = '"';
+        /* MSVCRT quoting: a run of N backslashes is doubled only when it
+         * precedes a '"' (or the closing quote); otherwise it is literal. */
+        for (const char *c = argv[i]; *c;) {
+            size_t bs = 0;
+            while (*c == '\\') { bs++; c++; }
+            if (*c == '"') {
+                for (size_t k = 0; k < bs * 2 + 1; k++) s[o++] = '\\';
+                s[o++] = '"';
+                c++;
+            } else if (*c == '\0') {
+                for (size_t k = 0; k < bs * 2; k++) s[o++] = '\\';
+            } else {
+                for (size_t k = 0; k < bs; k++) s[o++] = '\\';
+                s[o++] = *c++;
+            }
         }
-        strcat(s, "\"");
+        s[o++] = '"';
     }
+    s[o] = '\0';
     return s;
 }
 
@@ -226,21 +246,25 @@ int fs_proc_poll(fs_proc *p, long long deadline_ms, fs_proc_result *r) {
         *r = p->result;
         return 1;
     }
+    /* Check for completion first, so a process that finished just as the
+     * deadline passed is reported with its real status, not as a timeout. */
+    DWORD w = WaitForSingleObject(p->pi.hProcess, 0);
+    if (w != WAIT_TIMEOUT) {
+        DWORD code = 0;
+        GetExitCodeProcess(p->pi.hProcess, &code);
+        p->result.exit_code = (int)code;
+        CloseHandle(p->pi.hProcess);
+        CloseHandle(p->pi.hThread);
+        p->reaped = 1;
+        *r = p->result;
+        return 1;
+    }
     if (!p->killed && fs_now_ms() >= deadline_ms) {
         TerminateProcess(p->pi.hProcess, 1);
         p->killed = 1;
         p->result.timed_out = 1;
     }
-    DWORD w = WaitForSingleObject(p->pi.hProcess, 0);
-    if (w == WAIT_TIMEOUT) return 0;
-    DWORD code = 0;
-    GetExitCodeProcess(p->pi.hProcess, &code);
-    p->result.exit_code = (int)code;
-    CloseHandle(p->pi.hProcess);
-    CloseHandle(p->pi.hThread);
-    p->reaped = 1;
-    *r = p->result;
-    return 1;
+    return 0;
 }
 
 void fs_proc_free(fs_proc *p) {

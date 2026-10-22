@@ -11,13 +11,19 @@
 #   WRAP      on GNU/Clang linkers, also divert the libc allocators with
 #             -Wl,--wrap (for objects not compiled with the override header).
 
+# MSVC's default Debug flags include /RTC1, which is incompatible with
+# /fsanitize=address ("Command line error D8016"). Strip it here so that any
+# target instrumented with ASan (ours or a downstream consumer's) links.
+if(MSVC)
+    foreach(cfg C_FLAGS_DEBUG C_FLAGS_RELWITHDEBINFO CXX_FLAGS_DEBUG CXX_FLAGS_RELWITHDEBINFO)
+        if(DEFINED CMAKE_${cfg})
+            string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_${cfg} "${CMAKE_${cfg}}")
+        endif()
+    endforeach()
+endif()
+
 function(failstep_instrument target)
     cmake_parse_arguments(FI "NO_ASAN;WRAP" "" "" ${ARGN})
-
-    get_target_property(_src_dir failstep SOURCE_DIR)
-    if(NOT _src_dir)
-        set(_src_dir "${CMAKE_CURRENT_LIST_DIR}/../../..")
-    endif()
 
     target_link_libraries(${target} PRIVATE failstep::failstep)
 

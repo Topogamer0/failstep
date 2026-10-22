@@ -241,6 +241,30 @@ static const char *sarif_level(fs_ptype t) {
     return (t == PT_ABNORMAL || t == PT_HANG) ? "warning" : "error";
 }
 
+/* Is this frame sanitizer/libc-internal rather than the user's code? */
+static int frame_is_internal_loc(const fs_frame *fr) {
+    const char *fn = fr->func ? fr->func : "";
+    const char *fl = fr->file ? fr->file : "";
+    if (!strcmp(fn, "malloc") || !strcmp(fn, "free") || !strcmp(fn, "calloc") ||
+        !strcmp(fn, "realloc") || strstr(fn, "failstep_") || strstr(fn, "__interceptor") ||
+        strstr(fn, "__asan") || strstr(fn, "printf_common"))
+        return 1;
+    if (strstr(fl, "libsanitizer") || strstr(fl, "sanitizer_common") || strstr(fl, "asan/") ||
+        strstr(fl, "compiler-rt"))
+        return 1;
+    return 0;
+}
+
+/* Choose a single, developer-actionable source location for SARIF: the first
+ * user frame of the error stack, else the injected allocation site. */
+static const fs_frame *pick_location(const fs_job *j) {
+    for (int i = 0; i < j->err_n; i++)
+        if (j->err[i].file && j->err[i].file[0] && !frame_is_internal_loc(&j->err[i]))
+            return &j->err[i];
+    if (j->inj_n > 0) return &j->inj[0];
+    return j->err_n > 0 ? &j->err[0] : NULL;
+}
+
 static void write_sarif(FILE *f, const fs_cfg *cfg, fs_group *g, int ng) {
     fputs("{\n  \"version\": \"2.1.0\",\n", f);
     fputs("  \"$schema\": \"https://json.schemastore.org/sarif-2.1.0.json\",\n", f);
@@ -265,7 +289,7 @@ static void write_sarif(FILE *f, const fs_cfg *cfg, fs_group *g, int ng) {
         fs_job *j = g[i].rep;
         char cmd[2048], msg[2560];
         repro_cmd(cfg, j, cmd, sizeof(cmd));
-        const fs_frame *loc = (j->err_n > 0) ? &j->err[0] : (j->inj_n > 0 ? &j->inj[0] : NULL);
+        const fs_frame *loc = pick_location(j);
         snprintf(msg, sizeof(msg), "%s after injected allocation failure #%llu (%d occurrence%s). Reproduce: %s",
                  fs_ptype_label(g[i].ptype), j->index, g[i].count, g[i].count == 1 ? "" : "s", cmd);
         if (i) fputc(',', f);

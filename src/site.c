@@ -49,18 +49,36 @@ failstep_site_t failstep_hash_frames(const failstep_frame_t *frames, int n) {
     return h ? h : 1;
 }
 
-/* dladdr strings live for the lifetime of the process, so a shallow copy of the
- * frame array is safe to keep in the registry and to read at exit. */
+static char *dup_str(const char *s) {
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char *p = (char *)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+
+/* Deep-copies the frames, including their module and symbol strings, so the
+ * registry does not alias transient storage. On POSIX the dladdr strings happen
+ * to live for the process, but the Windows capture reuses a single buffer for
+ * module names, so a shallow copy would dangle. */
 failstep_frame_t *failstep_frames_dup(const failstep_frame_t *frames, int n) {
     if (n <= 0) return NULL;
     failstep_frame_t *out = (failstep_frame_t *)malloc((size_t)n * sizeof(*out));
     if (!out) return NULL;
-    memcpy(out, frames, (size_t)n * sizeof(*out));
+    for (int i = 0; i < n; i++) {
+        out[i] = frames[i];
+        out[i].module = dup_str(frames[i].module);
+        out[i].symbol = dup_str(frames[i].symbol);
+    }
     return out;
 }
 
 void failstep_frames_free(failstep_frame_t *frames, int n) {
-    (void)n;
+    if (!frames) return;
+    for (int i = 0; i < n; i++) {
+        free((void *)frames[i].module);
+        free((void *)frames[i].symbol);
+    }
     free(frames);
 }
 
@@ -85,14 +103,27 @@ void failstep_mark_internal(uintptr_t fn) {
     if (g_ninternal < FS_INTERNAL_MAX) g_internal[g_ninternal++] = fn;
 }
 
+static int symbol_is_internal(const char *sym) {
+    return sym && (strncmp(sym, "failstep", 8) == 0 || strncmp(sym, "__wrap_", 7) == 0);
+}
+
 static int frame_is_internal(const failstep_frame_t *f) {
+    /* Module cue: a shared-library build resolves the module name directly. */
+    const char *b = base_name(f->module);
+    if (b[0] && strstr(b, "failstep")) return 1;
+    /*
+     * Address-window cue for static builds, where the module is the host binary
+     * and dladdr may not resolve the symbol. A return address lands inside one
+     * of the runtime's small functions. To avoid dropping a genuine user frame
+     * that merely sits within the window, only trust the window when the symbol
+     * is unknown or is itself a runtime symbol -- a resolved user/library symbol
+     * is never internal.
+     */
+    if (f->symbol && !symbol_is_internal(f->symbol)) return 0;
     uintptr_t a = (uintptr_t)f->addr;
     for (int i = 0; i < g_ninternal; i++) {
         if (a >= g_internal[i] && (a - g_internal[i]) < FS_INTERNAL_WINDOW) return 1;
     }
-    /* Secondary cue for shared-library builds. */
-    const char *b = base_name(f->module);
-    if (b[0] && strstr(b, "failstep")) return 1;
     return 0;
 }
 
@@ -172,7 +203,10 @@ int failstep_capture(failstep_frame_t *frames, int max, int skip) {
     void *raw[FAILSTEP_MAX_FRAMES];
     USHORT got = RtlCaptureStackBackTrace(0, (ULONG)FAILSTEP_MAX_FRAMES, raw, NULL);
     if (got == 0) return 0;
-    static char modbuf[FAILSTEP_MAX_FRAMES][MAX_PATH];
+    /* Thread-local: capture runs outside the runtime lock, so a shared buffer
+     * would race between threads. The strings are deep-copied before the next
+     * capture reuses this buffer (see failstep_frames_dup). */
+    static __declspec(thread) char modbuf[FAILSTEP_MAX_FRAMES][MAX_PATH];
 
     failstep_frame_t tmp[FAILSTEP_MAX_FRAMES];
     for (USHORT i = 0; i < got; i++) {

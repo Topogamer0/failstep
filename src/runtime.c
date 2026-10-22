@@ -27,9 +27,23 @@
 
 #if defined(_MSC_VER)
 #  define FS_NOINLINE __declspec(noinline)
+#  define FS_TLS __declspec(thread)
 #else
 #  define FS_NOINLINE __attribute__((noinline))
+#  define FS_TLS __thread
 #endif
+
+/*
+ * Re-entrancy guard. When the runtime is linked statically and the target uses
+ * -Wl,--wrap=malloc, the runtime's OWN bookkeeping allocations (the site
+ * registry, the fuzz bitmap, backtrace/dladdr internals) are diverted to
+ * __wrap_malloc too, which would call back into the decision path -- deadlocking
+ * on the non-recursive lock and, worse, deciding on the runtime's internal
+ * allocations. This per-thread flag makes a nested decision a no-op pass-through
+ * so __wrap_* calls __real_* for those. It is thread-local so a genuine
+ * concurrent decision on another thread is never suppressed.
+ */
+static FS_TLS int g_in_decide;
 
 /* ---- lock --------------------------------------------------------------- */
 
@@ -96,7 +110,7 @@ static fs_mode_t parse_mode(const char *s) {
 static void write_stats(void);
 
 /* Weak so these resolve to NULL (and are skipped) when --wrap is not used. */
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__APPLE__)
 extern void *__wrap_malloc(size_t) __attribute__((weak));
 extern void *__wrap_calloc(size_t, size_t) __attribute__((weak));
 extern void *__wrap_realloc(void *, size_t) __attribute__((weak));
@@ -126,7 +140,7 @@ static void register_internal_frames(void) {
     failstep_mark_internal(fn_addr((void (*)(void))failstep_strdup));
     failstep_mark_internal(fn_addr((void (*)(void))failstep_strndup));
     failstep_mark_internal(fn_addr((void (*)(void))failstep_aligned_alloc));
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__APPLE__)
     if (__wrap_malloc) failstep_mark_internal(fn_addr((void (*)(void))__wrap_malloc));
     if (__wrap_calloc) failstep_mark_internal(fn_addr((void (*)(void))__wrap_calloc));
     if (__wrap_realloc) failstep_mark_internal(fn_addr((void (*)(void))__wrap_realloc));
@@ -283,11 +297,17 @@ static int decide_core(failstep_site_t site, const failstep_frame_t *frames, int
  * lands on the user's allocation call.
  */
 FS_NOINLINE int failstep__decide(void) {
+    if (g_in_decide) return 0; /* re-entrant (runtime's own allocation): pass through */
+    g_in_decide = 1;
+
     lock();
     ensure_init_locked();
     int off = (g.mode == MODE_OFF) && !g.fuzz_active;
     unlock();
-    if (off) return 0;
+    if (off) {
+        g_in_decide = 0;
+        return 0;
+    }
 
     failstep_frame_t frames[FAILSTEP_MAX_FRAMES];
     int n = failstep_capture(frames, FAILSTEP_MAX_FRAMES, 0);
@@ -296,6 +316,7 @@ FS_NOINLINE int failstep__decide(void) {
     lock();
     int r = decide_core(site, frames, n);
     unlock();
+    g_in_decide = 0;
     return r;
 }
 
@@ -310,17 +331,24 @@ FS_NOINLINE int failstep_should_fail(void) {
 }
 
 int failstep_should_fail_at(failstep_site_t site) {
+    if (g_in_decide) return 0;
+    g_in_decide = 1;
+
     lock();
     ensure_init_locked();
     int off = (g.mode == MODE_OFF) && !g.fuzz_active;
     unlock();
-    if (off) return 0;
+    if (off) {
+        g_in_decide = 0;
+        return 0;
+    }
 
     failstep_frame_t frames[FAILSTEP_MAX_FRAMES];
     int n = failstep_capture(frames, FAILSTEP_MAX_FRAMES, 0);
     lock();
     int r = decide_core(site, frames, n);
     unlock();
+    g_in_decide = 0;
     return r;
 }
 
@@ -377,7 +405,51 @@ FS_NOINLINE void *failstep_realloc(void *ptr, size_t size) {
     return realloc(ptr, size);
 }
 
+#if defined(_WIN32)
+/* On Windows an aligned_alloc of alignment > 16 is served by _aligned_malloc,
+ * which must be released with _aligned_free, not free(). Since the override
+ * routes both aligned_alloc and free through the runtime, we remember the
+ * _aligned_malloc'd pointers so failstep_free can release each correctly. */
+static void **g_aligned;
+static size_t g_aligned_n, g_aligned_cap;
+
+static void aligned_remember(void *p) {
+    if (!p) return;
+    lock();
+    if (g_aligned_n == g_aligned_cap) {
+        size_t cap = g_aligned_cap ? g_aligned_cap * 2 : 32;
+        void **q = (void **)realloc(g_aligned, cap * sizeof(*q));
+        if (q) {
+            g_aligned = q;
+            g_aligned_cap = cap;
+        }
+    }
+    if (g_aligned_n < g_aligned_cap) g_aligned[g_aligned_n++] = p;
+    unlock();
+}
+
+static int aligned_forget(void *p) {
+    int found = 0;
+    lock();
+    for (size_t i = 0; i < g_aligned_n; i++) {
+        if (g_aligned[i] == p) {
+            g_aligned[i] = g_aligned[--g_aligned_n];
+            found = 1;
+            break;
+        }
+    }
+    unlock();
+    return found;
+}
+#endif
+
 FS_NOINLINE void failstep_free(void *ptr) {
+#if defined(_WIN32)
+    if (ptr && aligned_forget(ptr)) {
+        _aligned_free(ptr);
+        return;
+    }
+#endif
     free(ptr);
 }
 
@@ -409,7 +481,9 @@ FS_NOINLINE void *failstep_aligned_alloc(size_t alignment, size_t size) {
      * block is freeable with the normal free() the override routes to. Larger
      * alignments need _aligned_malloc (and _aligned_free). */
     if (alignment <= 16) return malloc(size);
-    return _aligned_malloc(size, alignment);
+    void *p = _aligned_malloc(size, alignment);
+    aligned_remember(p);
+    return p;
 #elif defined(__APPLE__)
     void *p = NULL;
     if (alignment < sizeof(void *)) alignment = sizeof(void *);

@@ -81,9 +81,8 @@ What the earlier tools do well, and where failstep differs:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build                     # builds libfailstep and the `failstep` CLI
 cc -g -fsanitize=address \
-   -include failstep/override.h \        # route this file's allocations through failstep
-   -Ifailstep/include myprog.c \
-   build/libfailstep.a -ldl -lpthread -o myprog
+   -Iinclude -include failstep/override.h \   # route this file's allocations through failstep
+   myprog.c build/libfailstep.a -ldl -lpthread -o myprog
 build/failstep enumerate -- ./myprog    # fail allocation 1, then 2, ... one per run
 ```
 
@@ -224,7 +223,7 @@ Results:
   memory. This is precisely the bug the v0.2.0 changelog describes.
 - **Ollama-C v0.2.0** — **clean**: 102 allocations across 48 distinct sites, every
   injected failure handled correctly.
-- **[ollama-rag-c](https://github.com/Topogamer0/ollama-c-rag)** (indexing and
+- **[ollama-c-rag](https://github.com/Topogamer0/ollama-c-rag)** (indexing and
   searching a document through the library) — **clean** in both `sites` and
   `enumerate` mode: 49 allocations across 43 sites, no problems. (failstep was
   scoped to the project's own code; bundled SQLite and Ollama-C were left as the
@@ -246,7 +245,14 @@ add_executable(mytests mytests.c)
 failstep_instrument(mytests)        # adds the override header, ASan, and links the runtime
 ```
 
-Or with pkg-config: `cc $(pkg-config --cflags failstep) myprog.c $(pkg-config --libs failstep)`.
+Or with pkg-config (remember the override header and AddressSanitizer, exactly as
+in the Quick Start — without them the target allocates normally and failstep has
+nothing to drive):
+
+```sh
+cc -fsanitize=address -include failstep/override.h \
+   $(pkg-config --cflags failstep) myprog.c $(pkg-config --libs failstep) -o myprog
+```
 
 Prebuilt CLI binaries for Linux, macOS and Windows are attached to each release.
 

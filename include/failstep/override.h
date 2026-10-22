@@ -13,8 +13,10 @@
  * sits in front of it. No LD_PRELOAD, no relinking of libc.
  *
  * The runtime itself must NOT see these macros; it defines FAILSTEP_NO_OVERRIDE
- * before including anything. Translation units that need the real functions can
- * do the same.
+ * before including anything. A translation unit that is force-included with this
+ * header but needs the real functions must opt out on the command line
+ * (-DFAILSTEP_NO_OVERRIDE / /DFAILSTEP_NO_OVERRIDE), because a `#define` inside
+ * the source runs after the force-include has already taken effect.
  *
  * SPDX-License-Identifier: MIT
  */

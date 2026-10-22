@@ -36,8 +36,11 @@ else()
 endif()
 
 # ---- runtime library ------------------------------------------------------
+# wrap.c provides the --wrap interceptors (GNU ld / lld only). It is excluded on
+# Windows (no --wrap) and on Apple, whose linker rejects the undefined __real_*
+# symbols when building a shared library and which has no --wrap anyway.
 set(FAILSTEP_SOURCES src/runtime.c src/site.c)
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     list(APPEND FAILSTEP_SOURCES src/wrap.c)
 endif()
 

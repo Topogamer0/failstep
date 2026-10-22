@@ -112,10 +112,30 @@ int fs_read_stats(const char *path, unsigned long long *total, unsigned long lon
 /* ---- symbolization of injected frames ---------------------------------- */
 
 #if !defined(_WIN32)
+/* Single-quote a string for the shell, escaping embedded single quotes as
+ * '\'' so a module path containing a quote cannot break the command. */
+static void shell_squote(const char *s, char *out, size_t n) {
+    size_t o = 0;
+    if (o < n) out[o++] = '\'';
+    for (; *s && o + 4 < n; s++) {
+        if (*s == '\'') {
+            out[o++] = '\'';
+            out[o++] = '\\';
+            out[o++] = '\'';
+            out[o++] = '\'';
+        } else {
+            out[o++] = *s;
+        }
+    }
+    if (o < n) out[o++] = '\'';
+    out[o < n ? o : n - 1] = '\0';
+}
+
 static void run_addr2line(fs_frame *fr) {
     if (!fr->module) return;
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C 0x%llx 2>/dev/null", fr->module, fr->off);
+    char q[1200], cmd[2048];
+    shell_squote(fr->module, q, sizeof(q));
+    snprintf(cmd, sizeof(cmd), "addr2line -e %s -f -C 0x%llx 2>/dev/null", q, fr->off);
     FILE *pp = popen(cmd, "r");
     if (!pp) return;
     char func[1024] = {0}, loc[1024] = {0};
@@ -174,22 +194,32 @@ static int parse_asan_frame(const char *line, fs_frame *fr) {
         return 1;
     }
     const char *rest = in + 4;
-    /* function name = up to next space */
-    const char *sp = rest;
-    while (*sp && *sp != ' ') sp++;
-    size_t flen = (size_t)(sp - rest);
-    fr->func = (char *)fs_xmalloc(flen + 1);
-    memcpy(fr->func, rest, flen);
-    fr->func[flen] = '\0';
-    /* location = the token after the function */
-    while (*sp == ' ') sp++;
-    if (*sp && *sp != '(') {
+    /* Copy the part after " in ", trimming trailing whitespace. */
+    char buf[2048];
+    snprintf(buf, sizeof(buf), "%s", rest);
+    char *e = buf + strlen(buf);
+    while (e > buf && isspace((unsigned char)e[-1])) *--e = '\0';
+
+    /*
+     * The source location (or "(module+0xNN)") is the LAST whitespace-delimited
+     * token; everything before it is the function name, which may itself
+     * contain spaces (C++ signatures like "std::vector<int>::push_back(int)").
+     */
+    char *lastsp = NULL;
+    for (char *p = buf; *p; p++)
+        if (*p == ' ') lastsp = p;
+
+    char *loc = NULL;
+    if (lastsp) {
+        *lastsp = '\0';
+        loc = lastsp + 1;
+        fr->func = fs_xstrdup(buf);
+    } else {
+        fr->func = fs_xstrdup(buf); /* no location token */
+    }
+
+    if (loc && loc[0] && loc[0] != '(') {
         /* file:line[:col] */
-        char loc[1024];
-        snprintf(loc, sizeof(loc), "%s", sp);
-        /* trim trailing spaces */
-        char *e = loc + strlen(loc);
-        while (e > loc && isspace((unsigned char)e[-1])) *--e = '\0';
         char *c1 = strchr(loc, ':');
         if (c1) {
             *c1 = '\0';
@@ -232,14 +262,13 @@ static void parse_asan(fs_job *job, const char *text) {
         }
         job->asan_type = fs_xstrdup(type);
 
-        /* SEGV on a null address -> missing NULL check */
+        /* A SEGV at (or very near) address 0 is a dereference of the NULL the
+         * failed allocation returned -- a missing NULL check. */
         const char *segv = strstr(text, "SEGV on unknown address");
         if (segv) {
             const char *addr = strstr(segv, "0x");
-            if (addr && strncmp(addr, "0x000000000000", 14) == 0)
-                job->ptype = PT_NULLDEREF;
-            else
-                job->ptype = PT_ASAN;
+            unsigned long long a = addr ? strtoull(addr, NULL, 16) : ~0ull;
+            job->ptype = (a < 0x1000) ? PT_NULLDEREF : PT_ASAN;
         } else {
             job->ptype = PT_ASAN;
         }
