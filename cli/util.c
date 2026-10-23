@@ -83,6 +83,7 @@ const char *fs_ptype_name(fs_ptype t) {
     case PT_NULLDEREF: return "null-deref";
     case PT_HANG: return "hang";
     case PT_ABNORMAL: return "abnormal-exit";
+    case PT_EXIT: return "clean-exit";
     }
     return "unknown";
 }
@@ -95,6 +96,11 @@ const char *fs_ptype_label(fs_ptype t) {
     case PT_NULLDEREF: return "NULL dereference (missing NULL check)";
     case PT_HANG: return "hang (timeout)";
     case PT_ABNORMAL: return "abnormal exit";
+    case PT_EXIT: return "clean exit";
     }
     return "unknown";
+}
+
+int fs_ptype_is_problem(fs_ptype t) {
+    return t != PT_CLEAN && t != PT_EXIT;
 }

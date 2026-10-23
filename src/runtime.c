@@ -323,7 +323,7 @@ FS_NOINLINE int failstep__decide(void) {
 /* ---- public decision API ------------------------------------------------ */
 
 const char *failstep_version(void) {
-    return "0.1.0";
+    return FAILSTEP_VERSION_STRING;
 }
 
 FS_NOINLINE int failstep_should_fail(void) {

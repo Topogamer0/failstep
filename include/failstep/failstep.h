@@ -31,7 +31,14 @@ extern "C" {
 /* Semantic version of the runtime. */
 #define FAILSTEP_VERSION_MAJOR 0
 #define FAILSTEP_VERSION_MINOR 1
-#define FAILSTEP_VERSION_PATCH 0
+#define FAILSTEP_VERSION_PATCH 1
+
+#define FAILSTEP_STR_(x) #x
+#define FAILSTEP_STR(x) FAILSTEP_STR_(x)
+/* "MAJOR.MINOR.PATCH", derived from the numbers above. */
+#define FAILSTEP_VERSION_STRING                                               \
+    FAILSTEP_STR(FAILSTEP_VERSION_MAJOR) "." FAILSTEP_STR(FAILSTEP_VERSION_MINOR) "." \
+        FAILSTEP_STR(FAILSTEP_VERSION_PATCH)
 
 /* Returns the runtime version as "MAJOR.MINOR.PATCH". */
 FAILSTEP_API const char *failstep_version(void);

@@ -5,6 +5,7 @@
 add_executable(test_unit test_unit.c)
 target_link_libraries(test_unit PRIVATE failstep::failstep)
 target_compile_options(test_unit PRIVATE ${FAILSTEP_WARNINGS})
+target_compile_definitions(test_unit PRIVATE FAILSTEP_PROJECT_VERSION="${PROJECT_VERSION}")
 add_test(NAME unit COMMAND test_unit)
 
 # ---- integration tests ----------------------------------------------------
@@ -18,9 +19,10 @@ set(EXPECT ${CMAKE_CURRENT_SOURCE_DIR}/expect.py)
 set(CLI $<TARGET_FILE:failstep-cli>)
 set(WD ${CMAKE_CURRENT_BINARY_DIR}/wd)
 
-# fs_expect(<name> <mode> <problem|clean> <target-cmake-target> [TYPE t] [STEPS k] [TIMEOUT s])
+# fs_expect(<name> <mode> <problem|clean> <target-cmake-target> [TYPE t] [STEPS k]
+#           [TIMEOUT s] [INFO_EXIT status [INFO_RUNS n]] [ARGS failstep-options...])
 function(fs_expect name mode expect target)
-    cmake_parse_arguments(E "" "TYPE;STEPS;TIMEOUT" "" ${ARGN})
+    cmake_parse_arguments(E "" "TYPE;STEPS;TIMEOUT;INFO_EXIT;INFO_RUNS" "ARGS" ${ARGN})
     set(args --failstep ${CLI} --mode ${mode} --outdir ${WD}/${name} --expect ${expect})
     if(E_TYPE)
         list(APPEND args --type ${E_TYPE})
@@ -31,6 +33,15 @@ function(fs_expect name mode expect target)
     if(E_TIMEOUT)
         list(APPEND args --timeout ${E_TIMEOUT})
     endif()
+    if(DEFINED E_INFO_EXIT)
+        list(APPEND args --info-exit ${E_INFO_EXIT})
+    endif()
+    if(E_INFO_RUNS)
+        list(APPEND args --info-runs ${E_INFO_RUNS})
+    endif()
+    foreach(a ${E_ARGS})
+        list(APPEND args "--arg=${a}")
+    endforeach()
     add_test(NAME ${name}
         COMMAND ${Python3_EXECUTABLE} ${EXPECT} ${args} -- $<TARGET_FILE:${target}>)
 endfunction()
@@ -53,6 +64,16 @@ fs_expect(leak_ok       enumerate clean ex_leak_ok)
 fs_expect(hang_ok       sites    clean ex_hang_ok TIMEOUT 3)
 fs_expect(abort_ok      sites    clean ex_abort_on_oom_ok)
 fs_expect(server_ok     continue clean ex_server_ok STEPS 2)
+
+# orderly exits: stopping with an error status when memory runs out is not a
+# bug. By default those runs are info only; --ok-exit / --strict-exit turn an
+# unexpected status into a problem.
+fs_expect(exit_clean      enumerate clean   ex_exit_on_oom INFO_EXIT 1 INFO_RUNS 2)
+fs_expect(exit_ok_listed  enumerate clean   ex_exit_on_oom INFO_EXIT 1 ARGS --ok-exit 1,2)
+fs_expect(exit_unexpected enumerate problem ex_exit_on_oom TYPE abnormal-exit ARGS --ok-exit 2)
+fs_expect(exit_strict     enumerate problem ex_exit_on_oom TYPE abnormal-exit ARGS --strict-exit)
+# a crash by signal stays a problem whatever exit statuses are declared expected
+fs_expect(abort_ok_exit   sites     problem ex_abort_on_oom TYPE abnormal-exit ARGS --ok-exit 6,134)
 
 # fuzz integration (Clang + libFuzzer)
 if(FAILSTEP_BUILD_FUZZERS)

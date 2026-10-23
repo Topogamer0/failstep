@@ -18,7 +18,9 @@ static int g_failures;
     } while (0)
 
 static void test_version(void) {
-    CHECK(strcmp(failstep_version(), "0.1.0") == 0);
+    /* The runtime, the header macros and the CMake project version agree. */
+    CHECK(strcmp(failstep_version(), FAILSTEP_VERSION_STRING) == 0);
+    CHECK(strcmp(failstep_version(), FAILSTEP_PROJECT_VERSION) == 0);
 }
 
 static void test_tag_sites(void) {
