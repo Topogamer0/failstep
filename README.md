@@ -111,7 +111,8 @@ failstep <mode> [options] -- <target> [args...]
 
 Useful options: `-j N` (parallel workers), `-t SEC` (per-run timeout), `-k N`
 (`continue` follow-up steps), `-f text|json|sarif`, `-o DIR` (work dir; runs are
-resumable — re-run with `-r` after an interruption), `--out FILE`.
+resumable — re-run with `-r` after an interruption), `--out FILE`, and
+`--ok-exit LIST` / `--strict-exit` (see [Orderly exits](#orderly-exits-are-not-problems)).
 
 ### Projects with their own allocator
 
@@ -177,9 +178,51 @@ failstep distinguishes these problem types:
 - **`null-deref`** — the program dereferenced the `NULL` the failed allocation
   returned (a missing NULL check).
 - **`hang`** — the run exceeded the timeout (e.g. an infinite retry loop).
-- **`abnormal-exit`** — the process aborted or exited non-zero without an ASan
-  report (e.g. `assert(ptr)` on out-of-memory — a self-inflicted denial of
-  service).
+- **`abnormal-exit`** — the process was killed by a signal without an ASan
+  report (e.g. `abort()` or `assert(ptr)` on out-of-memory — a self-inflicted
+  denial of service); or, with `--ok-exit`/`--strict-exit`, it exited with a
+  status you did not declare as expected. The report says which:
+  `killed by signal 6 (SIGABRT)` or `exited with status 3, unexpected under --ok-exit 1`.
+
+Crashes by signal, ASan errors, leaks and hangs are always problems, whatever
+the options.
+
+### Orderly exits are not problems
+
+A program that notices the failed allocation, cleans up and stops with an error
+status — `if (!p) return 1;` — is handling out-of-memory correctly. When a run
+ends that way (a non-zero status, but no signal, no ASan report, no leak, no
+hang), failstep does not report a problem; it lists the run as info:
+
+```
+$ failstep enumerate -- ./ex_exit_on_oom
+failstep: mode=enumerate  runs=2  failing=0  problems=0  clean-exits=2
+
+No problems found: every injected allocation failure was handled cleanly.
+
+Info (not problems): orderly exits with an expected status
+  - exits cleanly with code 1 when allocation #1 or #2 fails (2 runs)
+```
+
+In JSON these runs appear in the `info` array (and `clean_exits`); in SARIF as
+notes on the invocation rather than results, so they raise no code-scanning
+alert. They never change failstep's exit status.
+
+To be stricter:
+
+- **`--ok-exit LIST`** — the statuses your program uses to report
+  out-of-memory, e.g. `--ok-exit 1,2`. An orderly exit with any *other* non-zero
+  status is then reported as `abnormal-exit`: it usually means the failure
+  escaped into some other error path.
+- **`--strict-exit`** — report every orderly non-zero exit not listed in
+  `--ok-exit` (with no list, every one — the behaviour of failstep 0.1.0).
+
+| options | orderly exit with status N ≠ 0 |
+|---|---|
+| none | info |
+| `--ok-exit 1,2` | info if N is 1 or 2, otherwise `abnormal-exit` |
+| `--strict-exit` | `abnormal-exit` |
+| `--strict-exit --ok-exit 1` | info if N is 1, otherwise `abnormal-exit` |
 
 ## CI integration
 
@@ -273,9 +316,18 @@ Prebuilt CLI binaries for Linux, macOS and Windows are attached to each release.
 - Making one allocation fail is a model of memory pressure, not a proof of its
   absence: failstep exercises the failure of each site independently, not every
   combination of simultaneous failures.
-- A non-zero exit with no signal, ASan report or leak is reported as
-  `abnormal-exit`. A program that deliberately exits non-zero on OOM is doing the
-  right thing; treat that type as informational.
+- failstep tells a crash from an orderly exit by how the target process ended.
+  If the target is a **wrapper script**, make it propagate the real program's
+  termination signal: a shell reports a child killed by signal N as status
+  128+N (139 for SIGSEGV), which would otherwise look like an orderly exit. ASan
+  reports are still caught through the captured output; the info line flags
+  statuses in the 128+N range. `examples/ollama/ollama_mock.py` shows how to
+  re-raise the child's signal.
+- On **Windows** there are no signals: crashes (access violations, fast-fail)
+  end the process with an NTSTATUS exception code and are always reported. But
+  depending on the CRT's abort behaviour, `abort()` can instead end it with
+  status 3, indistinguishable from `exit(3)`; declare your real out-of-memory
+  status with `--ok-exit` so that such a 3 is reported.
 
 ## License
 

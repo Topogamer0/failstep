@@ -20,6 +20,12 @@ def main():
     ap.add_argument("--type", default=None)
     ap.add_argument("--steps", default=None)
     ap.add_argument("--timeout", default="15")
+    ap.add_argument("--arg", action="append", default=[],
+                    help="extra failstep option (repeatable), e.g. --arg=--strict-exit")
+    ap.add_argument("--info-exit", type=int, default=None,
+                    help="require an info entry for an orderly exit with this status")
+    ap.add_argument("--info-runs", type=int, default=None,
+                    help="with --info-exit: the number of runs that entry must cover")
     ap.add_argument("rest", nargs=argparse.REMAINDER)
     a = ap.parse_args()
 
@@ -33,6 +39,7 @@ def main():
     cmd = [a.failstep, a.mode, "-f", "json", "-o", a.outdir, "-t", a.timeout, "-q"]
     if a.steps:
         cmd += ["-k", a.steps]
+    cmd += a.arg
     cmd += ["--"] + target
 
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -46,6 +53,17 @@ def main():
 
     problems = data.get("problems", 0)
     types = [r.get("type") for r in data.get("results", [])]
+
+    if a.info_exit is not None:
+        entries = [i for i in data.get("info", []) if i.get("exit_code") == a.info_exit]
+        if not entries:
+            print(f"expect.py: expected an info entry for exit status {a.info_exit}, got "
+                  f"{data.get('info')}", file=sys.stderr)
+            return 1
+        if a.info_runs is not None and entries[0].get("runs") != a.info_runs:
+            print(f"expect.py: expected {a.info_runs} run(s) for exit status {a.info_exit}, "
+                  f"got {entries[0].get('runs')}", file=sys.stderr)
+            return 1
 
     if a.expect == "clean":
         if problems != 0:

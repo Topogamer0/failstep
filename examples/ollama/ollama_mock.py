@@ -21,6 +21,7 @@ Ollama-C v0.1.0 use-after-free:
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -87,9 +88,15 @@ def main():
     env = dict(os.environ, OLLAMA_HOST="127.0.0.1:%d" % server.server_address[1])
     env.pop("OLLAMA_API_KEY", None)
     try:
-        return subprocess.run(sys.argv[1:], env=env).returncode
+        rc = subprocess.run(sys.argv[1:], env=env).returncode
     finally:
         server.shutdown()
+    if rc < 0 and os.name == "posix":
+        # The harness was killed by a signal: die by the same signal, so that
+        # failstep sees a crash and not an orderly exit status of this wrapper.
+        signal.signal(-rc, signal.SIG_DFL)
+        os.kill(os.getpid(), -rc)
+    return rc
 
 
 if __name__ == "__main__":

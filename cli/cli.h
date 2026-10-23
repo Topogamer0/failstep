@@ -15,11 +15,16 @@ typedef enum {
     PT_LEAK,        /* LeakSanitizer reported a leak */
     PT_NULLDEREF,   /* dereferenced the NULL the failed allocation returned */
     PT_HANG,        /* exceeded the timeout */
-    PT_ABNORMAL     /* crashed or exited non-zero without an ASan report */
+    PT_ABNORMAL,    /* killed by a signal without an ASan report, or an orderly
+                       exit whose status is not expected (--strict-exit/--ok-exit) */
+    PT_EXIT         /* not a problem: orderly exit with an expected non-zero
+                       status (no signal, ASan report, leak or hang) -- the
+                       program reported out-of-memory and stopped. Info only. */
 } fs_ptype;
 
 const char *fs_ptype_name(fs_ptype t);   /* stable machine id, e.g. "asan-error" */
 const char *fs_ptype_label(fs_ptype t);  /* human label */
+int fs_ptype_is_problem(fs_ptype t);     /* counts as a problem (not clean/info) */
 
 /* ---- a resolved stack frame -------------------------------------------- */
 
@@ -86,6 +91,14 @@ typedef struct {
     int max_runs;             /* 0 = unlimited; safety cap */
     int quiet;
     int verbose;
+
+    /* Exit-status policy for orderly exits (no signal/ASan/leak/hang). By
+     * default every non-zero status is expected (info only). --ok-exit lists
+     * the expected statuses, making any other one a problem; --strict-exit
+     * expects none beyond those listed. */
+    int strict_exit;
+    int *ok_exit;
+    int n_ok_exit;
 } fs_cfg;
 
 /* ---- process control (proc.c) ------------------------------------------ */
@@ -126,9 +139,12 @@ int fs_read_stats(const char *path, unsigned long long *total, unsigned long lon
                   size_t *nsites);
 
 /* Reads a captured stderr file, detects ASan/LSan output, classifies the job,
- * and fills job->ptype/asan_type/err. The target binary path is used to
- * symbolize injected-frame offsets with addr2line/atos. */
-void fs_analyze(fs_job *job, const char *target_path);
+ * and fills job->ptype/asan_type/err. Symbolizes the injected frames, and
+ * applies cfg's exit-status policy to an orderly non-zero exit. */
+void fs_analyze(fs_job *job, const fs_cfg *cfg);
+
+/* Whether `code` is an expected status for an orderly exit under cfg. */
+int fs_exit_expected(const fs_cfg *cfg, int code);
 
 /* ---- reporting (report.c) ---------------------------------------------- */
 

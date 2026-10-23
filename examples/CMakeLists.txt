@@ -12,6 +12,11 @@ foreach(e ${FAILSTEP_SIMPLE})
     failstep_instrument(ex_${e}_ok)
 endforeach()
 
+# Correct handling that exits with an error status when memory runs out: must
+# give zero problems by default (the runs are listed as info).
+add_executable(ex_exit_on_oom exit_on_oom.c)
+failstep_instrument(ex_exit_on_oom)
+
 # The PHP2Shell-style long-lived server (continue mode).
 add_executable(ex_server server_bug.c)
 failstep_instrument(ex_server)

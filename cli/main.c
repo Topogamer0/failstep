@@ -117,13 +117,42 @@ static void usage(FILE *f) {
         "  -k, --steps N      continue mode: follow-up steps (default 2)\n"
         "  -r, --resume       reuse completed runs from a previous invocation\n"
         "      --max N        cap the number of runs (safety)\n"
+        "      --ok-exit LIST exit statuses the target uses to report out-of-memory\n"
+        "                     (e.g. 1,2); an orderly exit with any other non-zero\n"
+        "                     status is then reported as a problem\n"
+        "      --strict-exit  report every orderly non-zero exit not listed in\n"
+        "                     --ok-exit (by default they are only listed as info)\n"
         "  -q, --quiet        no progress output\n"
         "  -v, --verbose      one line per run\n"
         "  -h, --help         this help\n"
         "      --version      print version\n"
         "\n"
+        "Crashes by signal, ASan errors, leaks and hangs are always problems. An\n"
+        "orderly exit with a non-zero status (no signal, ASan report or leak) means\n"
+        "the target noticed the failure and stopped: by default that is info, not a\n"
+        "problem; --ok-exit and --strict-exit make unexpected statuses problems.\n"
+        "\n"
         "exit codes: 0 no problems, 1 problems found, 2 usage/internal error\n",
         f);
+}
+
+/* Parse "1,2,71" into cfg->ok_exit (appending, so the option can repeat).
+ * Returns 0 on a malformed list. */
+static int parse_ok_exit(fs_cfg *cfg, const char *list) {
+    const char *p = list;
+    if (!*p) return 0;
+    while (*p) {
+        char *end;
+        long v = strtol(p, &end, 10);
+        if (end == p || v < 0 || v > 2147483647L || (*end && *end != ',')) return 0;
+        int *grown = (int *)realloc(cfg->ok_exit, (size_t)(cfg->n_ok_exit + 1) * sizeof(int));
+        if (!grown) return 0;
+        cfg->ok_exit = grown;
+        cfg->ok_exit[cfg->n_ok_exit++] = (int)v;
+        p = *end ? end + 1 : end;
+        if (*end == ',' && !*p) return 0; /* trailing comma */
+    }
+    return 1;
 }
 
 /* ---- env construction -------------------------------------------------- */
@@ -306,7 +335,7 @@ static void finish_job(const fs_cfg *cfg, slot *s) {
     j->timed_out = s->res.timed_out;
     if (file_exists(s->reportp)) fs_read_report(s->reportp, j);
     j->err_path = fs_xstrdup(s->errp);
-    fs_analyze(j, cfg->targv[0]);
+    fs_analyze(j, cfg);
     rec_write(s->recp, j);
     s->active = 0;
     fs_proc_free(s->proc);
@@ -345,10 +374,10 @@ static void drive(const fs_cfg *cfg, fs_job *jobs, int njobs) {
                 done++;
                 if (!cfg->quiet) {
                     fs_job *j = slots[i].job;
-                    if (cfg->verbose || j->ptype != PT_CLEAN)
+                    if (cfg->verbose || fs_ptype_is_problem(j->ptype))
                         fprintf(stderr, "  [%d/%d] %-18s %s\n", done, njobs,
                                 (strcmp(cfg->mode, "sites") == 0) ? "site" : "run",
-                                j->ptype == PT_CLEAN ? "clean" : fs_ptype_label(j->ptype));
+                                fs_ptype_label(j->ptype));
                     else if ((done % 50) == 0)
                         fprintf(stderr, "  [%d/%d] ...\n", done, njobs);
                 }
@@ -381,7 +410,7 @@ static int run_fuzz(fs_cfg *cfg) {
     j->signalnum = r.signalnum;
     j->timed_out = r.timed_out;
     j->err_path = fs_xstrdup(errp);
-    fs_analyze(j, cfg->targv[0]);
+    fs_analyze(j, cfg);
 
     /* locate the crash input libFuzzer wrote, for the reproducer */
     size_t len;
@@ -464,6 +493,14 @@ int main(int argc, char **argv) {
             cfg.continue_steps = atoi(argv[++i]);
         } else if (!strcmp(a, "--max") && i + 1 < argc) {
             cfg.max_runs = atoi(argv[++i]);
+        } else if (!strcmp(a, "--ok-exit") && i + 1 < argc) {
+            if (!parse_ok_exit(&cfg, argv[++i])) {
+                fprintf(stderr, "failstep: --ok-exit expects a comma-separated list of exit "
+                                "statuses, e.g. 1,2 (got '%s')\n", argv[i]);
+                return 2;
+            }
+        } else if (!strcmp(a, "--strict-exit")) {
+            cfg.strict_exit = 1;
         } else if (!strcmp(a, "-r") || !strcmp(a, "--resume")) {
             cfg.resume = 1;
         } else if (!strcmp(a, "-q") || !strcmp(a, "--quiet")) {
@@ -547,7 +584,7 @@ int main(int argc, char **argv) {
                     jobs[k].scoped = 1;
                     jobs[k].continue_steps = cfg.continue_steps;
                 }
-                fs_analyze(&jobs[k], cfg.targv[0]);
+                fs_analyze(&jobs[k], &cfg);
                 jobs[k].ran = 1;
                 resumed++;
             }

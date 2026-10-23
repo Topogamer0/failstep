@@ -310,7 +310,16 @@ static void parse_asan(fs_job *job, const char *text) {
 
 /* ---- top-level classification ------------------------------------------ */
 
-void fs_analyze(fs_job *job, const char *target_path) {
+int fs_exit_expected(const fs_cfg *cfg, int code) {
+    if (cfg->n_ok_exit > 0) {
+        for (int i = 0; i < cfg->n_ok_exit; i++)
+            if (cfg->ok_exit[i] == code) return 1;
+        return 0;
+    }
+    return !cfg->strict_exit;
+}
+
+void fs_analyze(fs_job *job, const fs_cfg *cfg) {
     (void)base_name;
     symbolize_injected(job);
 
@@ -328,7 +337,14 @@ void fs_analyze(fs_job *job, const char *target_path) {
     if (job->ptype != PT_CLEAN) return; /* ASan/LSan already decided */
 
     /* No sanitizer report: fall back to the raw outcome. */
-    if (job->signalnum != 0) {
+    int crashed = job->signalnum != 0;
+#if defined(_WIN32)
+    /* Windows has no signals: a crash ends the process with an NTSTATUS
+     * exception code (0xC0000005 access violation, 0xC0000409 fast-fail...),
+     * which must not pass for an orderly exit status. */
+    if ((unsigned)job->exit_code >= 0xC0000000u) crashed = 1;
+#endif
+    if (crashed) {
 #if !defined(_WIN32)
         if (job->signalnum == 11 /* SIGSEGV */) {
             /* Under an injected NULL, a bare segfault is almost always a
@@ -337,11 +353,12 @@ void fs_analyze(fs_job *job, const char *target_path) {
             return;
         }
 #endif
-        job->ptype = PT_ABNORMAL;
+        job->ptype = PT_ABNORMAL; /* killed by a signal: always a problem */
     } else if (job->exit_code != 0) {
-        job->ptype = PT_ABNORMAL;
+        /* An orderly exit with a non-zero status: the program noticed the
+         * failure and stopped. Not a bug unless the status is unexpected. */
+        job->ptype = fs_exit_expected(cfg, job->exit_code) ? PT_EXIT : PT_ABNORMAL;
     } else {
         job->ptype = PT_CLEAN;
     }
-    (void)target_path;
 }

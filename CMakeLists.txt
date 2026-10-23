@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 project(failstep
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Systematic allocation-failure testing for C, compatible with AddressSanitizer"
     LANGUAGES C)
 
