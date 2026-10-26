@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-10-26
+
+No change to the library or the CLI: this release is about installing failstep.
+
+### Added
+
+- Homebrew: `brew install topogamer0/tap/failstep` installs the CLI, `libfailstep`, the headers
+  and the CMake and pkg-config files (README, "Install with Homebrew"). The formula uses the release
+  binaries on macOS arm64 and Linux x86_64 and builds from source on Intel Macs and Linux arm64.
+- The release workflow updates the failstep formula of the
+  [Homebrew tap](https://github.com/Topogamer0/homebrew-tap) (URLs, version and SHA-256) once a
+  release is published with its binaries. A release saved as a draft gets the binaries, and the
+  formula is updated when it is published. Pre-releases never update it.
+
+### Changed
+
+- Release workflow: when the tag already has a release, created on the GitHub page, published or
+  draft, the binaries are attached to it and its title and notes are left alone; the workflow
+  creates a release, with the notes of this changelog, only when the tag has none. The binaries are
+  attached once all three platforms have built, so a failed build attaches nothing, and the tag
+  must match the version in `CMakeLists.txt`.
+
 ## [0.1.1] - 2026-10-23
 
 ### Changed
@@ -51,5 +73,6 @@ resumable runs with timeouts; problems grouped by failed site and error stack, w
 SARIF output and CI exit codes; examples, CTest suite, CMake and pkg-config packages; CI on Linux,
 macOS and Windows (MSVC `/fsanitize=address`).
 
+[0.1.2]: https://github.com/Topogamer0/failstep/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Topogamer0/failstep/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Topogamer0/failstep/releases/tag/v0.1.0
