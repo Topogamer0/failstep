@@ -8,18 +8,23 @@ name: Release
 #
 # Once the release is published with its archives, the failstep formula of the
 # Homebrew tap (https://github.com/Topogamer0/homebrew-tap) is moved to the new
-# version; see docs/release-integration.md there. A draft gets the archives but
-# not the formula update: publishing it runs this workflow again (`release`
-# event), which then updates the formula. That is also the way to release when
-# immutable releases are enabled, since a published immutable release takes no
-# new assets: push the tag, create the release as a draft for it, publish it
-# once the archives are attached. Pre-releases (a tag such as v1.2.0-rc.1, or
-# a release marked as pre-release) never update the formula.
+# version; see docs/release-integration.md there. Pre-releases (a tag such as
+# v1.2.0-rc.1, or a release marked as pre-release) do not update it.
+#
+# A release created on the GitHub page with a new tag starts this workflow when
+# it is published, since GitHub creates the tag then. A draft for a tag pushed
+# beforehand gets the archives but not the formula update, as does a release
+# marked as pre-release: publishing the draft, or turning the pre-release into
+# a full release, runs the workflow again (`release` event, type `released`),
+# which then updates the formula. A published immutable release takes no new
+# assets: with immutable releases enabled, push the tag and let the workflow
+# create the release, or create a draft for the tag before the builds finish
+# and publish it once the archives are attached.
 on:
   push:
     tags: ["v*"]
   release:
-    types: [published]
+    types: [released]
 
 permissions:
   contents: read
@@ -138,7 +143,8 @@ jobs:
           fi
 
   # Runs after the archives are attached (tag push), or by itself when a
-  # release is published from the GitHub page (`release` event).
+  # release is published, or a pre-release turned into a full release, on the
+  # GitHub page (`release` event).
   check:
     name: Check that the release is published
     needs: release
@@ -172,7 +178,7 @@ jobs:
             *) echo "::error::Looking up release $TAG failed (HTTP $status)."; cat release.json; exit 1 ;;
           esac
           if [ "$(jq -r .prerelease release.json)" = true ]; then
-            skip "Release $TAG is a pre-release: the Homebrew formula is not updated."
+            skip "Release $TAG is a pre-release: the Homebrew formula is updated if it becomes a full release."
           fi
           # The archives the formula downloads.
           missing=""
@@ -193,7 +199,9 @@ jobs:
   homebrew:
     name: Update the Homebrew formula
     needs: check
-    if: needs.check.outputs.published == 'true'
+    # The status function is needed: in a `release` event run, build and
+    # release are skipped, and the implicit success() would skip this job too.
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.check.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:

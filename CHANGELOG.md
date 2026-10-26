@@ -15,8 +15,9 @@ No change to the library or the CLI: this release is about installing failstep.
   binaries on macOS arm64 and Linux x86_64 and builds from source on Intel Macs and Linux arm64.
 - The release workflow updates the failstep formula of the
   [Homebrew tap](https://github.com/Topogamer0/homebrew-tap) (URLs, version and SHA-256) once a
-  release is published with its binaries. A release saved as a draft gets the binaries, and the
-  formula is updated when it is published. Pre-releases never update it.
+  release is published with its binaries. Pre-releases do not update it. A draft for a tag pushed
+  beforehand gets the binaries, and the formula is updated when the draft is published; likewise
+  when a pre-release is turned into a full release.
 
 ### Changed
 
