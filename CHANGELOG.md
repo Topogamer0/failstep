@@ -17,7 +17,8 @@ No change to the library or the CLI: this release is about installing failstep.
   [Homebrew tap](https://github.com/Topogamer0/homebrew-tap) (URLs, version and SHA-256) once a
   release is published with its binaries. Pre-releases do not update it. A draft for a tag pushed
   beforehand gets the binaries, and the formula is updated when the draft is published; likewise
-  when a pre-release is turned into a full release.
+  when a `vX.Y.Z` release marked as pre-release becomes a full release (a tag such as
+  `v1.2.0-rc.1` never updates it).
 
 ### Changed
 

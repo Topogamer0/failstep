@@ -8,18 +8,21 @@ name: Release
 #
 # Once the release is published with its archives, the failstep formula of the
 # Homebrew tap (https://github.com/Topogamer0/homebrew-tap) is moved to the new
-# version; see docs/release-integration.md there. Pre-releases (a tag such as
-# v1.2.0-rc.1, or a release marked as pre-release) do not update it.
+# version; see docs/release-integration.md there. A pre-release tag such as
+# v1.2.0-rc.1 never updates it, nor does a release marked as pre-release while
+# it is one.
 #
 # A release created on the GitHub page with a new tag starts this workflow when
-# it is published, since GitHub creates the tag then. A draft for a tag pushed
-# beforehand gets the archives but not the formula update, as does a release
-# marked as pre-release: publishing the draft, or turning the pre-release into
-# a full release, runs the workflow again (`release` event, type `released`),
-# which then updates the formula. A published immutable release takes no new
-# assets: with immutable releases enabled, push the tag and let the workflow
-# create the release, or create a draft for the tag before the builds finish
-# and publish it once the archives are attached.
+# it is published, since GitHub creates the tag then. A draft for a vX.Y.Z tag
+# pushed beforehand gets the archives but not the formula update, as does a
+# vX.Y.Z release marked as pre-release: publishing the draft, or turning the
+# pre-release into a full release, runs the workflow again (`release` event,
+# type `released`), which then updates the formula.
+#
+# A published immutable release takes no new assets: with immutable releases
+# enabled, push the tag and let the workflow create the release, or create a
+# draft for the tag before the builds finish and publish it once the archives
+# are attached.
 on:
   push:
     tags: ["v*"]
@@ -114,10 +117,13 @@ jobs:
           set -euo pipefail
           files=(dist/*)
           printf 'Archive: %s\n' "${files[@]}"
-          # Every release of the tag, drafts included (the token can see them).
+          # The releases of the tag, drafts included (the token can see them).
           # A failed request stops the job: it must not be taken for "no release".
-          existing="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end')"
+          releases_of_tag() {
+            gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end'
+          }
+          existing="$(releases_of_tag)"
           if [ -n "$existing" ]; then
             echo "Release $TAG exists ($(echo "$existing" | paste -sd, -)): attaching the archives to it."
             gh release upload "$TAG" "${files[@]}" --clobber
@@ -137,9 +143,15 @@ jobs:
           fi
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
           if ! gh release create "$TAG" "${files[@]}" "${flags[@]}"; then
-            # Created on the GitHub page in the meantime: attach to that one.
+            # Published on the GitHub page in the meantime: attach to that one.
             echo "Could not create release $TAG; attaching the archives to the existing one."
             gh release upload "$TAG" "${files[@]}" --clobber
+          fi
+          # A draft saved on the GitHub page while gh was creating the release
+          # does not stop it: say so rather than leave two releases unnoticed.
+          after="$(releases_of_tag)"
+          if [ "$(printf '%s\n' "$after" | grep -c .)" -gt 1 ]; then
+            echo "::warning::Tag $TAG now has several releases ($(echo "$after" | paste -sd, -)): one was saved on the GitHub page while this job created its own. Keep one and delete the others."
           fi
 
   # Runs after the archives are attached (tag push), or by itself when a
