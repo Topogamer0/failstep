@@ -31,7 +31,7 @@ extern "C" {
 /* Semantic version of the runtime. */
 #define FAILSTEP_VERSION_MAJOR 0
 #define FAILSTEP_VERSION_MINOR 1
-#define FAILSTEP_VERSION_PATCH 1
+#define FAILSTEP_VERSION_PATCH 2
 
 #define FAILSTEP_STR_(x) #x
 #define FAILSTEP_STR(x) FAILSTEP_STR_(x)

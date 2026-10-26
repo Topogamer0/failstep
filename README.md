@@ -297,7 +297,25 @@ cc -fsanitize=address -include failstep/override.h \
    $(pkg-config --cflags failstep) myprog.c $(pkg-config --libs failstep) -o myprog
 ```
 
-Prebuilt CLI binaries for Linux, macOS and Windows are attached to each release.
+Prebuilt CLI binaries for Linux x86_64, macOS arm64 and Windows x86_64 are
+attached to each release.
+
+### Install with Homebrew
+
+On macOS (Apple Silicon and Intel) and Linux:
+
+```sh
+brew install topogamer0/tap/failstep
+```
+
+This installs the `failstep` CLI, `libfailstep`, the headers and the CMake and pkg-config files,
+so `find_package(failstep)` and `pkg-config failstep` work without building failstep yourself.
+On Linux x86_64 it installs the release binary, which needs glibc 2.34 or later.
+
+On Intel Macs and on Linux arm64 there is no release binary, so Homebrew builds failstep from
+the source archive of the release, installing CMake first. On Intel Macs Homebrew no longer has
+a prebuilt CMake either and compiles it too, which takes a while the first time. Update with
+`brew upgrade failstep`.
 
 ## Limitations
 
